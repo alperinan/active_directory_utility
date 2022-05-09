@@ -7,6 +7,7 @@ namespace ActiveDirectoryUtilities
 {
 	public class AdData
 	{
+
 		public bool IsUserActive(string samAccountName)
 		{
 
@@ -29,7 +30,6 @@ namespace ActiveDirectoryUtilities
 
 
 		}
-
 
 		public AccountStatus GetActiveDirectoryStatusBySamAccountName ( string samAccountName)
         {
@@ -58,7 +58,6 @@ namespace ActiveDirectoryUtilities
 				return AccountStatus.disabled;
 			}
         }
-
 
 		public List<GroupPrincipal> GetAdGroupsBySamAccountName (string samAccountName)
         {
@@ -93,7 +92,6 @@ namespace ActiveDirectoryUtilities
 
 			return returnResult;
         }
-
 
 		public UserPrincipal GetUserDetailsBySamAccountName (string samAccountName)
         {
@@ -131,9 +129,8 @@ namespace ActiveDirectoryUtilities
 
 			return false;
         }
-
-
-		public List<UserPrincipal> GetAllUsersInAdGroup (string groupName)
+		
+		public List<UserPrincipal> GetAllUsersInAdGroupByGroupName (string groupName)
         {
 
 			List<UserPrincipal> returnList = new List<UserPrincipal>();
@@ -164,7 +161,206 @@ namespace ActiveDirectoryUtilities
 			return returnList;
         }
 
+		public List<ActiveDirectoryMember> GetUsersInAdGroupIncludingNestedGroups (string groupName, HashSet<string> groupsAlreadyProcessed, string topGroupName = "")
+        {
 
+			List<ActiveDirectoryMember> returnList = new List<ActiveDirectoryMember>();
+
+			PrincipalContext pc = new PrincipalContext(ContextType.Domain);
+
+			GroupPrincipal gp = GroupPrincipal.FindByIdentity(pc, IdentityType.SamAccountName, groupName);
+
+			groupsAlreadyProcessed.Add(groupName.ToLower());
+
+			if (gp!=null)
+            {
+
+				foreach (Principal p in gp.GetMembers())
+                {
+
+					if (p.StructuralObjectClass == null)
+						continue;
+
+					if (!p.StructuralObjectClass.ToLower().Equals("user"))
+                    {
+
+						if (p.StructuralObjectClass.ToLower().Equals("group"))
+                        {
+
+							if (!groupsAlreadyProcessed.Contains(p.SamAccountName.ToLower()))
+                            {
+
+								returnList.AddRange(GetUsersInAdGroupIncludingNestedGroups(p.SamAccountName, groupsAlreadyProcessed, groupName));
+
+								groupsAlreadyProcessed.Add(p.SamAccountName.ToLower());
+
+                            }
+
+                        }
+
+                    }
+					else
+                    {
+
+						UserPrincipal theUser = p as UserPrincipal;
+
+						if (theUser != null)
+                        {
+
+							returnList.Add(new ActiveDirectoryMember(groupName, p.SamAccountName, topGroupName));
+                        }
+
+
+
+                    }
+
+
+
+
+                }
+
+
+
+
+
+
+
+
+
+
+
+            }
+
+
+
+
+
+
+			return returnList;
+
+        }
+
+		public List<string> GetAllAdGroupNames ()
+        {
+			List<string> returnList = new List<string>();
+
+			PrincipalContext pc = new PrincipalContext(ContextType.Domain);
+
+			GroupPrincipal gp = new GroupPrincipal(pc);
+
+			PrincipalSearcher ps = new PrincipalSearcher(gp);
+
+			foreach (var item in ps.FindAll())
+            {
+
+				returnList.Add(item.SamAccountName);
+
+            }
+
+			return returnList;
+
+        }
+
+		public DateTime FindLatestLoginDateTimeFromAllDomainControllersBySamAccountName (string samAccountName)
+        {
+			DirectoryContext context = new DirectoryContext(DirectoryContextType.Domain);
+
+			DateTime latestLogon = DateTime.MinValue;
+
+			DomainControllerCollection dcc = DomainController.FindAll(context);
+
+			Parallel.ForEach(dcc.Cast<object>(), dc1 =>
+			{
+
+				DirectorySearcher ds;
+				DomainController dc = (DomainController)dc1;
+
+				using (ds = dc.GetDirectorySearcher())
+                {
+
+					try
+                    {
+
+						ds.Filter = String.Format(
+
+							"(sAMAccountName={0})",
+							samAccountName
+							);
+
+						ds.PropertiesToLoad.Add("lastLogon");
+						ds.SizeLimit = 1;
+
+						SearchResult sr = ds.FindOne();
+
+						if (sr != null)
+                        {
+
+							DateTime lastLogon = DateTime.MinValue;
+
+							if (sr.Properties.Contains("lastLogon"))
+                            {
+
+								lastLogon = DateTime.FromFileTime(
+
+                                    (long)sr.Properties["lastLogon"][0]
+
+									);
+
+                            }
+
+							if (DateTime.Compare(lastLogon, latestLogon) > 0)
+								latestLogon = lastLogon;
+                        }
+
+                    }catch
+                    {
+
+                    }
+
+
+
+
+
+                }
+
+
+
+
+
+
+			});
+
+
+			return latestLogon;
+
+        }
+
+		public Dictionary<string, string> GetAllDomainControllersIpAddressKey ()
+        {
+			Dictionary<string, string> returnDict = new Dictionary<string, string>();
+
+			var domains = Forest.GetCurrentForest().Domains;
+
+			foreach (Domain domain in domains)
+            {
+				var domainName = domain.Name;
+
+				DirectoryContext context = new DirectoryContext(DirectoryContextType.Domain, domainName);
+
+				DomainControllerCollection dcc = DomainController.FindAll(context);
+
+				foreach (DomainController item in dcc)
+                {
+
+					returnDict.Add(item.IPAddress, item.Name);
+
+                }
+				
+            }
+
+			return returnDict;
+
+		}
 
 
 	}
